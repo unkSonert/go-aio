@@ -28,12 +28,13 @@ var (
 )
 
 type Config struct {
-	Brokers  []string `env:"KAFKA_BROKERS" envDefault:"localhost:9092" envSeparator:"," yaml:"brokers"`
-	ClientID string   `env:"KAFKA_CLIENT_ID" envDefault:"kafkax" yaml:"client_id"`
-	GroupID  string   `env:"KAFKA_GROUP_ID" yaml:"group_id"`
-	TLS      TLS      `yaml:"tls"`
-	SASL     SASL     `yaml:"sasl"`
-	DLQ      DLQ      `yaml:"dlq"`
+	Brokers     []string `env:"KAFKA_BROKERS" envDefault:"localhost:9092" envSeparator:"," yaml:"brokers"`
+	ClientID    string   `env:"KAFKA_CLIENT_ID" envDefault:"kafkax" yaml:"client_id"`
+	GroupID     string   `env:"KAFKA_GROUP_ID" yaml:"group_id"`
+	TopicPrefix string   `env:"KAFKA_TOPIC_PREFIX" yaml:"topic_prefix"`
+	TLS         TLS      `yaml:"tls"`
+	SASL        SASL     `yaml:"sasl"`
+	DLQ         DLQ      `yaml:"dlq"`
 
 	TLSConfig     *tls.Config    `yaml:"-"`
 	SASLMechanism sasl.Mechanism `yaml:"-"`
@@ -68,10 +69,11 @@ func (d DLQ) TopicFor(sourceTopic string) string {
 }
 
 type Kafka struct {
-	Brokers  []string
-	ClientID string
-	TLS      *tls.Config
-	SASL     sasl.Mechanism
+	Brokers     []string
+	ClientID    string
+	TopicPrefix string
+	TLS         *tls.Config
+	SASL        sasl.Mechanism
 }
 
 type Producer struct {
@@ -115,10 +117,11 @@ func (c Config) KafkaConfig() (Kafka, error) {
 		return Kafka{}, err
 	}
 	return Kafka{
-		Brokers:  c.Brokers,
-		ClientID: c.ClientID,
-		TLS:      c.tlsConfig(),
-		SASL:     mechanism,
+		Brokers:     c.Brokers,
+		ClientID:    c.ClientID,
+		TopicPrefix: c.TopicPrefix,
+		TLS:         c.tlsConfig(),
+		SASL:        mechanism,
 	}, nil
 }
 

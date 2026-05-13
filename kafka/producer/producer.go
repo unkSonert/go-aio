@@ -10,7 +10,8 @@ import (
 )
 
 type Producer struct {
-	writer *kafka.Writer
+	writer      *kafka.Writer
+	topicPrefix string
 }
 
 type publishOptions struct {
@@ -44,7 +45,7 @@ func New(cfg config.Producer) (*Producer, error) {
 		return nil, err
 	}
 	writer := kafka.NewWriter(cfg.WriterConfig())
-	return &Producer{writer: writer}, nil
+	return &Producer{writer: writer, topicPrefix: cfg.TopicPrefix}, nil
 }
 
 func (p *Producer) Publish(ctx context.Context, topic string, data any, opts ...Option) error {
@@ -60,7 +61,7 @@ func (p *Producer) Publish(ctx context.Context, topic string, data any, opts ...
 	}
 	options := collectOptions(opts...)
 	return p.writer.WriteMessages(ctx, kafka.Message{
-		Topic:   topic,
+		Topic:   p.topicPrefix + topic,
 		Key:     options.key,
 		Value:   value,
 		Headers: options.headers,

@@ -9,6 +9,7 @@ import (
 	"log"
 	"maps"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,11 +122,12 @@ func (c *Consumer) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.done = done
 	topics := topicsFromHandlers(c.handlers)
+	wireTopics := prefixTopics(c.config.TopicPrefix, topics)
 	handlers := make(map[string]Handler, len(c.handlers))
 	maps.Copy(handlers, c.handlers)
 	c.mu.Unlock()
 
-	reader := kafka.NewReader(c.config.ReaderConfig(topics))
+	reader := kafka.NewReader(c.config.ReaderConfig(wireTopics))
 	var dlq *producer.Producer
 	if c.config.DLQ.Enabled() {
 		var err error
@@ -223,10 +225,13 @@ func (c *Consumer) finishRun(done chan struct{}) {
 }
 
 func (c *Consumer) processMessage(ctx context.Context, reader *kafka.Reader, dlq *producer.Producer, handlers map[string]Handler, kafkaMsg kafka.Message) error {
+	logicalTopic := strings.TrimPrefix(kafkaMsg.Topic, c.config.TopicPrefix)
 	msg := fromKafkaMessage(kafkaMsg)
-	handler, ok := handlers[msg.Topic]
+	msg.Topic = logicalTopic
+
+	handler, ok := handlers[logicalTopic]
 	if !ok {
-		failure := fmt.Errorf("kafkax/consumer: no handler for topic %q partition %d offset %d", msg.Topic, msg.Partition, msg.Offset)
+		failure := fmt.Errorf("kafkax/consumer: no handler for topic %q partition %d offset %d", kafkaMsg.Topic, kafkaMsg.Partition, kafkaMsg.Offset)
 		return c.handleFailedMessage(ctx, reader, dlq, kafkaMsg, failure)
 	}
 
@@ -234,7 +239,7 @@ func (c *Consumer) processMessage(ctx context.Context, reader *kafka.Reader, dlq
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		failure := fmt.Errorf("kafkax/consumer: handler failed for topic %q partition %d offset %d: %w", msg.Topic, msg.Partition, msg.Offset, err)
+		failure := fmt.Errorf("kafkax/consumer: handler failed for topic %q partition %d offset %d: %w", kafkaMsg.Topic, kafkaMsg.Partition, kafkaMsg.Offset, err)
 		return c.handleFailedMessage(ctx, reader, dlq, kafkaMsg, failure)
 	}
 	return c.commitMessage(ctx, reader, kafkaMsg)
@@ -303,9 +308,10 @@ func (c *Consumer) publishDeadLetter(ctx context.Context, dlq *producer.Producer
 		kafka.Header{Key: "kafkax-original-offset", Value: []byte(strconv.FormatInt(kafkaMsg.Offset, 10))},
 		kafka.Header{Key: "kafkax-error", Value: []byte(failure.Error())},
 	)
+	logicalTopic := strings.TrimPrefix(kafkaMsg.Topic, c.config.TopicPrefix)
 	return dlq.Publish(
 		publishCtx,
-		c.config.DLQ.TopicFor(kafkaMsg.Topic),
+		c.config.DLQ.TopicFor(logicalTopic),
 		data,
 		producer.WithKey(kafkaMsg.Key),
 		producer.WithHeaders(headers...),
@@ -328,6 +334,17 @@ func topicsFromHandlers(handlers map[string]Handler) []string {
 		topics = append(topics, topic)
 	}
 	return topics
+}
+
+func prefixTopics(prefix string, topics []string) []string {
+	if prefix == "" {
+		return topics
+	}
+	out := make([]string, len(topics))
+	for i, t := range topics {
+		out[i] = prefix + t
+	}
+	return out
 }
 
 func sleepContext(ctx context.Context, d time.Duration) error {
