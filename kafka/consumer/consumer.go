@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,7 +123,9 @@ func (c *Consumer) Start(ctx context.Context) error {
 	topics := topicsFromHandlers(c.handlers)
 	wireTopics := prefixTopics(c.config.TopicPrefix, topics)
 	handlers := make(map[string]Handler, len(c.handlers))
-	maps.Copy(handlers, c.handlers)
+	for k, v := range c.handlers {
+		handlers[k] = v
+	}
 	c.mu.Unlock()
 
 	reader := kafka.NewReader(c.config.ReaderConfig(wireTopics))
@@ -286,8 +287,7 @@ func (c *Consumer) handleFailedMessage(ctx context.Context, reader *kafka.Reader
 }
 
 func (c *Consumer) publishDeadLetter(ctx context.Context, dlq *producer.Producer, kafkaMsg kafka.Message, failure error) error {
-	base := context.WithoutCancel(ctx)
-	publishCtx, cancel := context.WithTimeout(base, dlqPublishTimeout)
+	publishCtx, cancel := context.WithTimeout(ctx, dlqPublishTimeout)
 	defer cancel()
 
 	data := deadLetterData{
@@ -319,8 +319,7 @@ func (c *Consumer) publishDeadLetter(ctx context.Context, dlq *producer.Producer
 }
 
 func (c *Consumer) commitMessage(ctx context.Context, reader *kafka.Reader, msg kafka.Message) error {
-	base := context.WithoutCancel(ctx)
-	commitCtx, cancel := context.WithTimeout(base, commitTimeout)
+	commitCtx, cancel := context.WithTimeout(ctx, commitTimeout)
 	defer cancel()
 	if err := reader.CommitMessages(commitCtx, msg); err != nil {
 		return fmt.Errorf("kafkax/consumer: commit topic %q partition %d offset %d: %w", msg.Topic, msg.Partition, msg.Offset, err)
