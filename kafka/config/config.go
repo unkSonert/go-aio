@@ -2,6 +2,7 @@ package config
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,6 +26,7 @@ const (
 var (
 	ErrBrokersRequired = errors.New("kafkax/config: at least one kafka broker is required")
 	ErrGroupIDRequired = errors.New("kafkax/config: consumer group id is required")
+	ErrInvalidCACert   = errors.New("kafkax/config: invalid TLS CA certificate PEM")
 )
 
 type Config struct {
@@ -44,6 +46,7 @@ type TLS struct {
 	Enabled            bool   `env:"KAFKA_TLS_ENABLED" envDefault:"false" yaml:"enabled"`
 	ServerName         string `env:"KAFKA_TLS_SERVER_NAME" yaml:"server_name"`
 	InsecureSkipVerify bool   `env:"KAFKA_TLS_INSECURE_SKIP_VERIFY" envDefault:"false" yaml:"insecure_skip_verify"`
+	CACert             []byte `env:"KAFKA_TLS_CA_CERT" yaml:"ca_cert"`
 }
 
 type SASL struct {
@@ -97,6 +100,9 @@ func (c Config) Validate() error {
 	if _, err := c.saslMechanism(); err != nil {
 		return err
 	}
+	if _, err := c.tlsConfig(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -116,11 +122,15 @@ func (c Config) KafkaConfig() (Kafka, error) {
 	if err != nil {
 		return Kafka{}, err
 	}
+	tlsCfg, err := c.tlsConfig()
+	if err != nil {
+		return Kafka{}, err
+	}
 	return Kafka{
 		Brokers:     c.Brokers,
 		ClientID:    c.ClientID,
 		TopicPrefix: c.TopicPrefix,
-		TLS:         c.tlsConfig(),
+		TLS:         tlsCfg,
 		SASL:        mechanism,
 	}, nil
 }
@@ -198,17 +208,25 @@ func (c Consumer) ReaderConfig(topics []string) kafka.ReaderConfig {
 	}
 }
 
-func (c Config) tlsConfig() *tls.Config {
+func (c Config) tlsConfig() (*tls.Config, error) {
 	if c.TLSConfig != nil {
-		return c.TLSConfig
+		return c.TLSConfig, nil
 	}
 	if !c.TLS.Enabled {
-		return nil
+		return nil, nil
 	}
-	return &tls.Config{
+	cfg := &tls.Config{
 		ServerName:         c.TLS.ServerName,
 		InsecureSkipVerify: c.TLS.InsecureSkipVerify,
 	}
+	if len(c.TLS.CACert) > 0 {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(c.TLS.CACert) {
+			return nil, ErrInvalidCACert
+		}
+		cfg.RootCAs = pool
+	}
+	return cfg, nil
 }
 
 func (c Config) saslMechanism() (sasl.Mechanism, error) {
